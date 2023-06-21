@@ -1,0 +1,7 @@
+(print "Hello, 'world!'")
+(*
+    (+ a b)
+    c
+)
+(print "(print 12)")
+(exit :immediate t)
