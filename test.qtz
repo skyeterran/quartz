@@ -1,7 +1,7 @@
-(print "Hello, 'world!'")
-(*
-    (+ a b)
-    c
+(fn main []
+    (let [items ["Sock" "Salad" "Skye"]]
+        (each [i items]
+            (print i)
+        )
+    )
 )
-(print "(print 12)")
-(exit :immediate t)

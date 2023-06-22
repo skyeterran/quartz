@@ -1,27 +1,50 @@
 use std::fs;
 use std::error::Error;
-use std::thread::current;
+use std::fmt;
 
-#[derive(Debug)]
+/// The location of a token/expression in the source code
+#[derive(Debug, Clone, Copy)]
+struct Location {
+    line: usize,
+    column: usize,
+}
+
+impl Location {
+    fn new(line: usize, column: usize) -> Self {
+        Self {
+            line,
+            column,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 enum Token {
     LParen {
-        line: usize,
-        column: usize,
+        location: Location,
     },
     RParen {
-        line: usize,
-        column: usize,
+        location: Location,
     },
     Symbol {
         content: String,
-        line: usize,
-        column: usize,
+        location: Location,
     },
     StrLit {
         content: String,
-        line: usize,
-        column: usize,
+        location: Location,
     },
+}
+
+impl Token {
+    fn get_location(&self) -> Location {
+        match self {
+            Self::LParen { location } => { *location }
+            Self::RParen { location } => { *location }
+            Self::Symbol { location, .. } => { *location }
+            Self::StrLit { location, .. } => { *location }
+        }
+    }
 }
 
 enum Quote {
@@ -29,18 +52,50 @@ enum Quote {
     Double
 }
 
-enum Mode {
-    Unsure,
-    Symbol,
-    String
+#[derive(Debug, Clone)]
+enum Exp {
+    Nil,
+    List {
+        contents: Vec<Exp>,
+    },
+    Token {
+        contents: Token,
+    },
+}
+
+#[derive(Debug)]
+struct ParseError {
+    message: String,
+    location: Location,
+    cause: Option<Box<dyn Error>>,
+}
+
+impl ParseError {
+    fn new(message: String, location: Location) -> Box<dyn Error> {
+        Box::new(Self { message, location, cause: None })
+    }
+}
+
+impl Error for ParseError {
+    fn description(&self) -> &str {
+        &self.message
+    }
+
+    fn cause(&self) -> Option<&dyn Error> {
+        self.cause.as_ref().map(|e| &**e)
+    }
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
     let source = fs::read_to_string("test.qtz")?;
-    println!("{}", source);
 
     // Eat up those characters
-    let mut mode = Mode::Unsure;
     let mut in_symbol = false;
     let mut current_symbol = String::new();
     let mut in_string = false;
@@ -72,8 +127,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         in_string = false;
                         tokens.push(Token::StrLit {
                             content: current_string.clone(),
-                            line: this_line,
-                            column: this_column
+                            location: Location::new(this_line, this_column),
                         });
                         current_string = String::new();
                         mark_pos = false;
@@ -85,8 +139,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         in_string = false;
                         tokens.push(Token::StrLit {
                             content: current_string.clone(),
-                            line: this_line,
-                            column: this_column
+                            location: Location::new(this_line, this_column),
                         });
                         current_string = String::new();
                         mark_pos = false;
@@ -102,8 +155,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             match c {
                 '(' => {
                     tokens.push(Token::LParen {
-                        line,
-                        column
+                        location: Location::new(line, column),
                     });
                     mark_pos = true;
                 }
@@ -111,15 +163,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                     if in_symbol {
                         tokens.push(Token::Symbol {
                             content: current_symbol.clone(),
-                            line: this_line,
-                            column: this_column
+                            location: Location::new(this_line, this_column),
                         });
                         current_symbol = String::new();
                         in_symbol = false;
                     }
                     tokens.push(Token::RParen {
-                        line,
-                        column
+                        location: Location::new(line, column),
                     });
                     mark_pos = true;
                 }
@@ -138,8 +188,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         if current_symbol != "" {
                             tokens.push(Token::Symbol {
                                 content: current_symbol.clone(),
-                                line: this_line,
-                                column: this_column
+                                location: Location::new(this_line, this_column),
                             });
                             current_symbol = String::new();
                             in_symbol = false;
@@ -155,8 +204,123 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     }
+    if in_symbol {
+        tokens.push(Token::Symbol {
+            content: current_symbol.clone(),
+            location: Location::new(this_line, this_column),
+        });
+    }
 
-    println!("{:#?}", tokens);
+    //let mut expressions: Vec<Exp> = Vec::new();
+    let expressions = parse_expression(&tokens, 0, tokens.len())?;
+
+    println!("{:#?}", expressions);
 
     Ok(())
+}
+
+// start: the start of the range of tokens to parse
+// end: the end of the range of tokens to parse
+fn parse_expression(
+    tokens: &Vec<Token>,
+    start: usize,
+    end: usize
+) -> Result<Exp, Box<dyn Error>> {
+    let mut contents: Vec<Exp> = Vec::new();
+    let mut nested = false;
+    let mut i: usize = start;
+    let mut location = Location::new(0, 0);
+    loop {
+        if i > end || i >= tokens.len() { break; }
+        let t = tokens.get(i).unwrap();
+        location = t.get_location();
+        match t {
+            Token::LParen {..} => {
+                if nested {
+                    // Find the matching RParen
+                    let inner_end = find_exp_end(tokens, i);
+                    contents.push(parse_expression(tokens, i, inner_end)?);
+                    i = inner_end;
+                } else {
+                    nested = true;
+                }
+            }
+            Token::RParen {..} => {
+                if nested {
+                    /*
+                    if contents.is_empty() {
+                        return Ok(Exp::Nil);
+                    } else {
+                        return Ok(Exp::List { contents });
+                    }
+                    */
+                    nested = false;
+                } else {
+                    // Syntax error: Unexpected RParen
+                    return Err(ParseError::new(
+                        format!("Unexpected closing parentheses"),
+                        location,
+                    ));
+                }
+            }
+            Token::Symbol {..} | Token::StrLit {..} => {
+                if nested {
+                    contents.push(Exp::Token { contents: t.clone() });
+                } else {
+                    if end - start > 1 {
+                        // Multiple atoms outside of a list (syntax error)
+                        return Err(ParseError::new(
+                            format!("Invalid expression"),
+                            location,
+                        ));
+                    } else {
+                        // Single atom
+                        return Ok(Exp::Token { contents: t.clone() });
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    if nested {
+        // Syntax error: missing RParen
+        Err(ParseError::new(
+            format!("Missing closing parentheses"),
+            location,
+        ))
+    } else {
+        if contents.is_empty() {
+            return Ok(Exp::Nil);
+        } else {
+            return Ok(Exp::List { contents });
+        }
+    }
+}
+
+// Given a starting LParen index, return the index of the closing RParen
+fn find_exp_end(tokens: &Vec<Token>, start: usize) -> usize {
+    let mut nesting: usize = 0;
+    for i in start..tokens.len() {
+        let t = tokens.get(i).unwrap();
+        match t {
+            Token::LParen {..} => {
+                nesting += 1;
+                // Find the matching RParen
+            }
+            Token::RParen {..} => {
+                match nesting {
+                    0 => { // ERROR: Unexpected RParen
+                        todo!();
+                    }
+                    1 => { // Reached end of current outer exp
+                        return i;
+                    }
+                    _ => {}
+                }
+                nesting -= 1;
+            }
+            _ => {}
+        }
+    }
+    todo!()
 }
