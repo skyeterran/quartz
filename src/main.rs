@@ -40,6 +40,10 @@ enum Token {
         content: String,
         location: Location,
     },
+    Comment {
+        content: String,
+        location: Location,
+    },
 }
 
 impl Token {
@@ -51,6 +55,7 @@ impl Token {
             Self::RBracket { location } => { *location }
             Self::Symbol { location, .. } => { *location }
             Self::StrLit { location, .. } => { *location }
+            Self::Comment { location, .. } => { *location }
         }
     }
 }
@@ -103,14 +108,21 @@ impl fmt::Display for ParseError {
     }
 }
 
+enum ParseMode {
+    String,
+    Normal,
+    Comment,
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let source = fs::read_to_string("test.qtz")?;
 
     // Eat up those characters
+    let mut mode = ParseMode::Normal;
     let mut in_symbol = false;
     let mut current_symbol = String::new();
-    let mut in_string = false;
     let mut current_string = String::new();
+    let mut current_comment = String::new();
     let mut string_delim = Quote::Single;
     let mut tokens: Vec<Token> = Vec::new();
     let mut line: usize = 1;
@@ -131,92 +143,49 @@ fn main() -> Result<(), Box<dyn Error>> {
             this_column = column;
         }
         //println!("[{line}:{column}] ({this_line}:{this_column}) '{c}'");
-        if in_string {
-            match c {
-                '\'' => {
-                    if let Quote::Single = string_delim {
-                        in_string = false;
-                        tokens.push(Token::StrLit {
-                            content: current_string.clone(),
-                            location: Location::new(this_line, this_column),
-                        });
-                        current_string = String::new();
+        match mode {
+            ParseMode::String => {
+                match c {
+                    '\'' => {
+                        if let Quote::Single = string_delim {
+                            mode = ParseMode::Normal;
+                            tokens.push(Token::StrLit {
+                                content: current_string.clone(),
+                                location: Location::new(this_line, this_column),
+                            });
+                            current_string = String::new();
+                            mark_pos = false;
+                            continue;
+                        }
+                    }
+                    '\"' => {
+                        if let Quote::Double = string_delim {
+                            mode = ParseMode::Normal;
+                            tokens.push(Token::StrLit {
+                                content: current_string.clone(),
+                                location: Location::new(this_line, this_column),
+                            });
+                            current_string = String::new();
+                            mark_pos = false;
+                            continue;
+                        }
+                    }
+                    _ => {
                         mark_pos = false;
-                        continue;
                     }
                 }
-                '\"' => {
-                    if let Quote::Double = string_delim {
-                        in_string = false;
-                        tokens.push(Token::StrLit {
-                            content: current_string.clone(),
-                            location: Location::new(this_line, this_column),
-                        });
-                        current_string = String::new();
-                        mark_pos = false;
-                        continue;
-                    }
-                }
-                _ => {
-                    mark_pos = false;
-                }
+                current_string.push(c);
             }
-            current_string.push(c);
-        } else {
-            match c {
-                '(' => {
-                    tokens.push(Token::LParen {
-                        location: Location::new(line, column),
-                    });
-                    mark_pos = true;
-                }
-                ')' => {
-                    if in_symbol {
-                        tokens.push(Token::Symbol {
-                            content: current_symbol.clone(),
-                            location: Location::new(this_line, this_column),
+            ParseMode::Normal => {
+                match c {
+                    '(' => {
+                        tokens.push(Token::LParen {
+                            location: Location::new(line, column),
                         });
-                        current_symbol = String::new();
-                        in_symbol = false;
+                        mark_pos = true;
                     }
-                    tokens.push(Token::RParen {
-                        location: Location::new(line, column),
-                    });
-                    mark_pos = true;
-                }
-                '[' => {
-                    tokens.push(Token::LBracket {
-                        location: Location::new(line, column),
-                    });
-                    mark_pos = true;
-                }
-                ']' => {
-                    if in_symbol {
-                        tokens.push(Token::Symbol {
-                            content: current_symbol.clone(),
-                            location: Location::new(this_line, this_column),
-                        });
-                        current_symbol = String::new();
-                        in_symbol = false;
-                    }
-                    tokens.push(Token::RBracket {
-                        location: Location::new(line, column),
-                    });
-                    mark_pos = true;
-                }
-                '\'' => {
-                    in_string = true;
-                    string_delim = Quote::Single;
-                    mark_pos = false;
-                }
-                '\"' => {
-                    in_string = true;
-                    string_delim = Quote::Double;
-                    mark_pos = false;
-                }
-                ' ' | '\n' => {
-                    if in_symbol {
-                        if current_symbol != "" {
+                    ')' => {
+                        if in_symbol {
                             tokens.push(Token::Symbol {
                                 content: current_symbol.clone(),
                                 location: Location::new(this_line, this_column),
@@ -224,17 +193,87 @@ fn main() -> Result<(), Box<dyn Error>> {
                             current_symbol = String::new();
                             in_symbol = false;
                         }
+                        tokens.push(Token::RParen {
+                            location: Location::new(line, column),
+                        });
+                        mark_pos = true;
                     }
-                    mark_pos = true;
+                    '[' => {
+                        tokens.push(Token::LBracket {
+                            location: Location::new(line, column),
+                        });
+                        mark_pos = true;
+                    }
+                    ']' => {
+                        if in_symbol {
+                            tokens.push(Token::Symbol {
+                                content: current_symbol.clone(),
+                                location: Location::new(this_line, this_column),
+                            });
+                            current_symbol = String::new();
+                            in_symbol = false;
+                        }
+                        tokens.push(Token::RBracket {
+                            location: Location::new(line, column),
+                        });
+                        mark_pos = true;
+                    }
+                    '\'' => {
+                        mode = ParseMode::String;
+                        string_delim = Quote::Single;
+                        mark_pos = false;
+                    }
+                    '\"' => {
+                        mode = ParseMode::String;
+                        string_delim = Quote::Double;
+                        mark_pos = false;
+                    }
+                    ' ' | '\n' => {
+                        if in_symbol {
+                            if !current_symbol.is_empty() {
+                                tokens.push(Token::Symbol {
+                                    content: current_symbol.clone(),
+                                    location: Location::new(this_line, this_column),
+                                });
+                                current_symbol = String::new();
+                                in_symbol = false;
+                            }
+                        }
+                        mark_pos = true;
+                    }
+                    ';' => {
+                        mode = ParseMode::Comment;
+                    }
+                    _ => {
+                        in_symbol = true;
+                        current_symbol.push(c);
+                        mark_pos = current_symbol == "";
+                    }
                 }
-                _ => {
-                    in_symbol = true;
-                    current_symbol.push(c);
-                    mark_pos = current_symbol == "";
+            }
+            ParseMode::Comment => {
+                match c {
+                    '\n' => {
+                        // This comment is done, save it if needed
+                        if !current_comment.is_empty() {
+                            tokens.push(Token::Comment {
+                                content: current_comment.clone(),
+                                location: Location::new(this_line, this_column),
+                            });
+                            current_comment = String::new();
+                        }
+                        mode = ParseMode::Normal;
+                        mark_pos = true;
+                    }
+                    _ => {
+                        current_comment.push(c);
+                        mark_pos = current_comment == "";
+                    }
                 }
             }
         }
     }
+
     if in_symbol {
         tokens.push(Token::Symbol {
             content: current_symbol.clone(),
@@ -331,6 +370,7 @@ fn parse_expression(
                     }
                 }
             }
+            _ => {}
         }
         i += 1;
     }
