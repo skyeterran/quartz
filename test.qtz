@@ -1,6 +1,13 @@
+<<<<<<< HEAD
 (fn main [] ; Main function
     (let [items ["Sock" "Salad" "Skye"]] ; Just some stuff
         (each [i items] ; Iterate over each thing
+=======
+; Test
+(fn main []
+    (let [items ["Sock" "Salad" "Skye"]]
+        (each [i items]
+>>>>>>> ef2683ab0b84d481906965eafc7a3e88d99cf00d
             (print i)
         )
     )
