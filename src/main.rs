@@ -115,7 +115,7 @@ enum ParseMode {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let source = fs::read_to_string("test.qtz")?;
+    let source = fs::read_to_string("test.qz")?;
 
     // Eat up those characters
     let mut mode = ParseMode::Normal;
