@@ -26,6 +26,12 @@ enum Token {
     RParen {
         location: Location,
     },
+    LBracket {
+        location: Location,
+    },
+    RBracket {
+        location: Location,
+    },
     Symbol {
         content: String,
         location: Location,
@@ -41,6 +47,8 @@ impl Token {
         match self {
             Self::LParen { location } => { *location }
             Self::RParen { location } => { *location }
+            Self::LBracket { location } => { *location }
+            Self::RBracket { location } => { *location }
             Self::Symbol { location, .. } => { *location }
             Self::StrLit { location, .. } => { *location }
         }
@@ -55,6 +63,9 @@ enum Quote {
 #[derive(Debug, Clone)]
 enum Exp {
     Nil,
+    SExp {
+        contents: Vec<Exp>,
+    },
     List {
         contents: Vec<Exp>,
     },
@@ -173,6 +184,26 @@ fn main() -> Result<(), Box<dyn Error>> {
                     });
                     mark_pos = true;
                 }
+                '[' => {
+                    tokens.push(Token::LBracket {
+                        location: Location::new(line, column),
+                    });
+                    mark_pos = true;
+                }
+                ']' => {
+                    if in_symbol {
+                        tokens.push(Token::Symbol {
+                            content: current_symbol.clone(),
+                            location: Location::new(this_line, this_column),
+                        });
+                        current_symbol = String::new();
+                        in_symbol = false;
+                    }
+                    tokens.push(Token::RBracket {
+                        location: Location::new(line, column),
+                    });
+                    mark_pos = true;
+                }
                 '\'' => {
                     in_string = true;
                     string_delim = Quote::Single;
@@ -228,6 +259,7 @@ fn parse_expression(
 ) -> Result<Exp, Box<dyn Error>> {
     let mut contents: Vec<Exp> = Vec::new();
     let mut nested = false;
+    let mut in_list = false;
     let mut i: usize = start;
     let mut location = Location::new(0, 0);
     loop {
@@ -238,7 +270,7 @@ fn parse_expression(
             Token::LParen {..} => {
                 if nested {
                     // Find the matching RParen
-                    let inner_end = find_exp_end(tokens, i);
+                    let inner_end = find_exp_end(tokens, i, false);
                     contents.push(parse_expression(tokens, i, inner_end)?);
                     i = inner_end;
                 } else {
@@ -247,18 +279,36 @@ fn parse_expression(
             }
             Token::RParen {..} => {
                 if nested {
-                    /*
-                    if contents.is_empty() {
-                        return Ok(Exp::Nil);
-                    } else {
-                        return Ok(Exp::List { contents });
-                    }
-                    */
                     nested = false;
                 } else {
                     // Syntax error: Unexpected RParen
                     return Err(ParseError::new(
-                        format!("Unexpected closing parentheses"),
+                        format!("Unexpected closing paren"),
+                        location,
+                    ));
+                }
+            }
+            Token::LBracket {..} => {
+                if nested {
+                    // Find the matching RParen
+                    let inner_end = find_exp_end(tokens, i, true);
+                    contents.push(parse_expression(tokens, i, inner_end)?);
+                    i = inner_end;
+                } else {
+                    nested = true;
+                    in_list = true;
+                }
+            }
+            Token::RBracket {..} => {
+                if !in_list {
+                    todo!(); // Unexpected closing bracket
+                }
+                if nested {
+                    nested = false;
+                } else {
+                    // Syntax error: Unexpected RParen
+                    return Err(ParseError::new(
+                        format!("Unexpected closing bracket"),
                         location,
                     ));
                 }
@@ -270,7 +320,7 @@ fn parse_expression(
                     if end - start > 1 {
                         // Multiple atoms outside of a list (syntax error)
                         return Err(ParseError::new(
-                            format!("Invalid expression"),
+                            format!("Expression missing opening paren/bracket"),
                             location,
                         ));
                     } else {
@@ -289,23 +339,26 @@ fn parse_expression(
             location,
         ))
     } else {
-        if contents.is_empty() {
-            return Ok(Exp::Nil);
-        } else {
+        if in_list {
             return Ok(Exp::List { contents });
+        } else {
+            if contents.is_empty() {
+                return Ok(Exp::Nil);
+            } else {
+                return Ok(Exp::SExp { contents });
+            }
         }
     }
 }
 
 // Given a starting LParen index, return the index of the closing RParen
-fn find_exp_end(tokens: &Vec<Token>, start: usize) -> usize {
+fn find_exp_end(tokens: &Vec<Token>, start: usize, in_list: bool) -> usize {
     let mut nesting: usize = 0;
     for i in start..tokens.len() {
         let t = tokens.get(i).unwrap();
         match t {
             Token::LParen {..} => {
                 nesting += 1;
-                // Find the matching RParen
             }
             Token::RParen {..} => {
                 match nesting {
@@ -313,7 +366,30 @@ fn find_exp_end(tokens: &Vec<Token>, start: usize) -> usize {
                         todo!();
                     }
                     1 => { // Reached end of current outer exp
-                        return i;
+                        if in_list {
+                            todo!(); // This should be an RBracket
+                        } else {
+                            return i;
+                        }
+                    }
+                    _ => {}
+                }
+                nesting -= 1;
+            }
+            Token::LBracket {..} => {
+                nesting += 1;
+            }
+            Token::RBracket {..} => {
+                match nesting {
+                    0 => { // ERROR: Unexpected RParen
+                        todo!();
+                    }
+                    1 => { // Reached end of current outer exp
+                        if !in_list {
+                            todo!(); // This should be an RBracket
+                        } else {
+                            return i;
+                        }
                     }
                     _ => {}
                 }
