@@ -270,7 +270,7 @@ fn parse_expression(
             Token::LParen {..} => {
                 if nested {
                     // Find the matching RParen
-                    let inner_end = find_exp_end(tokens, i, false);
+                    let inner_end = find_exp_end(tokens, i, false)?;
                     contents.push(parse_expression(tokens, i, inner_end)?);
                     i = inner_end;
                 } else {
@@ -291,7 +291,7 @@ fn parse_expression(
             Token::LBracket {..} => {
                 if nested {
                     // Find the matching RParen
-                    let inner_end = find_exp_end(tokens, i, true);
+                    let inner_end = find_exp_end(tokens, i, true)?;
                     contents.push(parse_expression(tokens, i, inner_end)?);
                     i = inner_end;
                 } else {
@@ -299,17 +299,19 @@ fn parse_expression(
                     in_list = true;
                 }
             }
-            Token::RBracket {..} => {
+            Token::RBracket { location } => {
                 if !in_list {
-                    todo!(); // Unexpected closing bracket
+                    return Err(ParseError::new(
+                        format!("Unexpected closing bracket"),
+                        *location,
+                    ));
                 }
                 if nested {
                     nested = false;
                 } else {
-                    // Syntax error: Unexpected RParen
                     return Err(ParseError::new(
                         format!("Unexpected closing bracket"),
-                        location,
+                        *location,
                     ));
                 }
             }
@@ -352,24 +354,38 @@ fn parse_expression(
 }
 
 // Given a starting LParen index, return the index of the closing RParen
-fn find_exp_end(tokens: &Vec<Token>, start: usize, in_list: bool) -> usize {
+fn find_exp_end(
+    tokens: &Vec<Token>,
+    start: usize,
+    in_list: bool
+) -> Result<usize, Box<dyn Error>> {
     let mut nesting: usize = 0;
+    let mut start_location = Location::new(0, 0);
     for i in start..tokens.len() {
         let t = tokens.get(i).unwrap();
+        if i == start {
+            start_location = t.get_location();
+        }
         match t {
             Token::LParen {..} => {
                 nesting += 1;
             }
             Token::RParen {..} => {
                 match nesting {
-                    0 => { // ERROR: Unexpected RParen
-                        todo!();
+                    0 => {
+                        return Err(ParseError::new(
+                            format!("List is missing closing bracket"),
+                            start_location,
+                        ));
                     }
-                    1 => { // Reached end of current outer exp
+                    1 => {
                         if in_list {
-                            todo!(); // This should be an RBracket
+                            return Err(ParseError::new(
+                                format!("List is missing closing bracket"),
+                                start_location,
+                            ));
                         } else {
-                            return i;
+                            return Ok(i);
                         }
                     }
                     _ => {}
@@ -379,16 +395,22 @@ fn find_exp_end(tokens: &Vec<Token>, start: usize, in_list: bool) -> usize {
             Token::LBracket {..} => {
                 nesting += 1;
             }
-            Token::RBracket {..} => {
+            Token::RBracket { location } => {
                 match nesting {
-                    0 => { // ERROR: Unexpected RParen
-                        todo!();
+                    0 => {
+                        return Err(ParseError::new(
+                            format!("Unexpected closing bracket"),
+                            *location,
+                        ));
                     }
-                    1 => { // Reached end of current outer exp
+                    1 => {
                         if !in_list {
-                            todo!(); // This should be an RBracket
+                            return Err(ParseError::new(
+                                format!("Unexpected closing bracket"),
+                                *location,
+                            ));
                         } else {
-                            return i;
+                            return Ok(i);
                         }
                     }
                     _ => {}
@@ -398,5 +420,8 @@ fn find_exp_end(tokens: &Vec<Token>, start: usize, in_list: bool) -> usize {
             _ => {}
         }
     }
-    todo!()
+    Err(ParseError::new(
+        format!("Inner expression is never closed"),
+        start_location,
+    ))
 }
