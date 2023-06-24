@@ -1,4 +1,4 @@
-# Quartz
+# Quartz 💎
 ## An experimental Lisp
 Example:
 ```

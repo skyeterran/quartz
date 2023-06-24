@@ -46,6 +46,20 @@ enum Token {
     },
 }
 
+impl fmt::Display for Token {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Token::LParen {..} => { write!(f, "(") }
+            Token::RParen {..} => { write!(f, ")") }
+            Token::LBracket {..} => { write!(f, "[") }
+            Token::RBracket {..} => { write!(f, "]") }
+            Token::Symbol { content, .. } => { write!(f, "{content}") }
+            Token::StrLit { content, .. } => { write!(f, "\"{content}\"") }
+            Token::Comment { content, .. } => { write!(f, "{content}") }
+        }
+    }
+}
+
 impl Token {
     fn get_location(&self) -> Location {
         match self {
@@ -60,11 +74,6 @@ impl Token {
     }
 }
 
-enum Quote {
-    Single,
-    Double
-}
-
 #[derive(Debug, Clone)]
 enum Exp {
     Nil,
@@ -77,6 +86,33 @@ enum Exp {
     Token {
         contents: Token,
     },
+}
+
+impl fmt::Display for Exp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Exp::Nil => {
+                write!(f, "nil")
+            }
+            Exp::SExp { contents } => {
+                let inner = contents.iter()
+                                    .map(|x| {format!("{x}")})
+                                    .collect::<Vec<String>>()
+                                    .join(" ");
+                write!(f, "({inner})")
+            }
+            Exp::List { contents } => {
+                let inner = contents.iter()
+                                    .map(|x| {format!("{x}")})
+                                    .collect::<Vec<String>>()
+                                    .join(" ");
+                write!(f, "[{inner}]")
+            }
+            Exp::Token { contents } => {
+                write!(f, "{contents}")
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -123,7 +159,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut current_symbol = String::new();
     let mut current_string = String::new();
     let mut current_comment = String::new();
-    let mut string_delim = Quote::Single;
     let mut tokens: Vec<Token> = Vec::new();
     let mut line: usize = 1;
     let mut this_line: usize = 1;
@@ -146,29 +181,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         match mode {
             ParseMode::String => {
                 match c {
-                    '\'' => {
-                        if let Quote::Single = string_delim {
-                            mode = ParseMode::Normal;
-                            tokens.push(Token::StrLit {
-                                content: current_string.clone(),
-                                location: Location::new(this_line, this_column),
-                            });
-                            current_string = String::new();
-                            mark_pos = false;
-                            continue;
-                        }
-                    }
                     '\"' => {
-                        if let Quote::Double = string_delim {
-                            mode = ParseMode::Normal;
-                            tokens.push(Token::StrLit {
-                                content: current_string.clone(),
-                                location: Location::new(this_line, this_column),
-                            });
-                            current_string = String::new();
-                            mark_pos = false;
-                            continue;
-                        }
+                        mode = ParseMode::Normal;
+                        tokens.push(Token::StrLit {
+                            content: current_string.clone(),
+                            location: Location::new(this_line, this_column),
+                        });
+                        current_string = String::new();
+                        mark_pos = false;
+                        continue;
                     }
                     _ => {
                         mark_pos = false;
@@ -218,14 +239,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                         });
                         mark_pos = true;
                     }
-                    '\'' => {
-                        mode = ParseMode::String;
-                        string_delim = Quote::Single;
-                        mark_pos = false;
-                    }
                     '\"' => {
                         mode = ParseMode::String;
-                        string_delim = Quote::Double;
                         mark_pos = false;
                     }
                     ' ' | '\n' => {
@@ -284,7 +299,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     //let mut expressions: Vec<Exp> = Vec::new();
     let expressions = parse_expression(&tokens, 0, tokens.len())?;
 
-    println!("{:#?}", expressions);
+    println!("{expressions}");
 
     Ok(())
 }

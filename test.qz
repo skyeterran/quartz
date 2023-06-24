@@ -2,6 +2,10 @@
     (let [items ["Sock" "Salad" "Skye"]] ; Just some stuff
         (each [i items] ; Iterate over each thing
             (print i)
+            (match (get i 0)
+                \a (print "That's an A")
+                _ (print "That's something else")
+            )
         )
     )
 )
