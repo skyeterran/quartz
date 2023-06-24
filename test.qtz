@@ -1,3 +1,4 @@
+; Test
 (fn main []
     (let [items ["Sock" "Salad" "Skye"]]
         (each [i items]
