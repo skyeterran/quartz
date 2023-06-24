@@ -1,0 +1,7 @@
+(fn main [] ; Main function
+    (let [items ["Sock" "Salad" "Skye"]] ; Just some stuff
+        (each [i items] ; Iterate over each thing
+            (print i)
+        )
+    )
+)
