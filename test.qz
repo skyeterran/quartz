@@ -1,4 +1,5 @@
-(do
-    (print "Hello, world")
-    (print "Hello, world")
-)
+(print "Hello, world")
+(print "You're looking pretty cute, world")
+(print "Do you come here often?")
+[1 1 2]
+"wow"
