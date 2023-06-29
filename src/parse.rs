@@ -78,14 +78,32 @@ impl Token {
 pub enum Exp {
     Nil,
     SExp {
-        contents: Vec<Exp>,
+        car: Box<Exp>,
+        cdr: Vec<Exp>,
     },
     List {
         contents: Vec<Exp>,
     },
-    Token {
+    Symbol {
         contents: Token,
     },
+}
+
+impl Exp {
+    fn new_sexp(contents: Vec<Exp>) -> Self {
+        let mut car = Exp::Nil;
+        let mut cdr: Vec<Exp> = Vec::new();
+        let mut i: usize = 0;
+        for c in contents {
+            if i == 0 {
+                car = c;
+            } else {
+                cdr.push(c);
+            }
+            i += 1;
+        }
+        Self::SExp { car: Box::new(car), cdr }
+    }
 }
 
 impl fmt::Display for Exp {
@@ -94,12 +112,17 @@ impl fmt::Display for Exp {
             Exp::Nil => {
                 write!(f, "nil")
             }
-            Exp::SExp { contents } => {
-                let inner = contents.iter()
-                                    .map(|x| {format!("{x}")})
-                                    .collect::<Vec<String>>()
-                                    .join(" ");
-                write!(f, "({inner})")
+            Exp::SExp { car, cdr } => {
+                let content = if cdr.is_empty() {
+                    format!("({car})")
+                } else {
+                    let cdr_list = cdr.iter()
+                                      .map(|x| {format!("{x}")})
+                                      .collect::<Vec<String>>()
+                                      .join(" ");
+                    format!("({car} {cdr_list})")
+                };
+                write!(f, "{content}")
             }
             Exp::List { contents } => {
                 let inner = contents.iter()
@@ -108,7 +131,7 @@ impl fmt::Display for Exp {
                                     .join(" ");
                 write!(f, "[{inner}]")
             }
-            Exp::Token { contents } => {
+            Exp::Symbol { contents } => {
                 write!(f, "{contents}")
             }
         }
@@ -297,6 +320,58 @@ pub fn tokenize(source: String) -> Vec<Token> {
     tokens
 }
 
+// Reads a list of expressions from a source string
+pub fn read_expressions(source: String) -> Result<Vec<Exp>, Box<dyn Error>> {
+    let tokens = tokenize(source);
+    let mut expressions: Vec<Exp> = Vec::new();
+    let mut nesting: usize = 0;
+    let mut start: usize = 0;
+    let mut i: usize = 0;
+
+    for t in &tokens {
+        match t {
+            Token::LParen {..} | Token::LBracket {..} => {
+                if nesting == 0 {
+                    start = i;
+                }
+                nesting += 1;
+            }
+            Token::RParen {..} | Token::RBracket {..} => {
+                if nesting > 0 {
+                    nesting -= 1;
+                } else {
+                    todo!() // Oh, what horror!
+                }
+                
+                if nesting == 0 {
+                    expressions.push(parse_expression(&tokens, start, i)?);
+                }
+            }
+            _ => {
+                if nesting == 0 {
+                    expressions.push(process_token(t));
+                }
+            }
+        }
+        i += 1;
+    }
+
+    Ok(expressions)
+}
+
+pub fn process_token(token: &Token) -> Exp {
+    match token {
+        Token::Symbol { content, .. }=> {
+            if content == "nil" {
+                Exp::Nil
+            } else {
+                Exp::Symbol { contents: token.clone() }
+            }
+        }
+        _ => Exp::Symbol { contents: token.clone() }
+    }
+}
+
 // start: the start of the range of tokens to parse
 // end: the end of the range of tokens to parse
 pub fn parse_expression(
@@ -364,7 +439,7 @@ pub fn parse_expression(
             }
             Token::Symbol {..} | Token::StrLit {..} => {
                 if nested {
-                    contents.push(Exp::Token { contents: t.clone() });
+                    contents.push(process_token(t));
                 } else {
                     if end - start > 1 {
                         // Multiple atoms outside of a list (syntax error)
@@ -374,7 +449,7 @@ pub fn parse_expression(
                         ));
                     } else {
                         // Single atom
-                        return Ok(Exp::Token { contents: t.clone() });
+                        return Ok(process_token(t));
                     }
                 }
             }
@@ -395,7 +470,7 @@ pub fn parse_expression(
             if contents.is_empty() {
                 return Ok(Exp::Nil);
             } else {
-                return Ok(Exp::SExp { contents });
+                return Ok(Exp::new_sexp(contents));
             }
         }
     }
